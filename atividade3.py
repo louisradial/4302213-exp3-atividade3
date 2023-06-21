@@ -10,17 +10,24 @@ class Field:
     intensity: np.ndarray
 
 class ElectricField(Field):
-    def __init__(self, filename, voltage) -> None:
+    @staticmethod
+    def from_csv(filename: str, voltage: float) -> "ElectricField":
         df = pandas.read_csv(filename, sep=" ")
         x = df.iloc[:, 0].to_numpy()
         y = df.iloc[:, 1].to_numpy()/voltage
-        self.position = x
-        self.intensity = y
+        return ElectricField(x, y)
 
 class MagneticField(Field):
-    def __init(self, filename, current) -> None:
+    @staticmethod
+    def from_csv(filename: str, current: float, offset: float) -> "MagneticField":
         df = pandas.read_csv(filename, sep=",")
-        x = df.iloc[:, 0].to_numpy()
+        x = df.iloc[:, 0].to_numpy() - offset
         y = df.iloc[:, 1].to_numpy()/current
-        self.position = x
-        self.intensity = y
+        return MagneticField(x, y)
+
+def output(e_field: ElectricField, b_field: MagneticField, positions: np.ndarray) -> pandas.DataFrame:
+    alfa = interpolate.interp1d(e_field.position, e_field.intensity)
+    beta = interpolate.interp1d(b_field.position, b_field.intensity)
+    outpute = alfa(positions)
+    outputb = beta(positions)
+    return pandas.DataFrame(data={'x (mm)': positions, 'alfa (1/m)': outpute, 'beta (T/A)': outputb})
