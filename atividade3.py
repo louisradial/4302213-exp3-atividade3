@@ -10,7 +10,7 @@ from matplotlib.gridspec import GridSpec
 from scipy import interpolate
 import scipy.odr as odr
 
-SAVE_FIGURE = True
+SAVE_FIGURE = False
 def save_figure(fig, of):
     if of is not None:
         print("[save] saving figure at " + of)
@@ -154,7 +154,7 @@ class MagneticField(Field):
 
     @staticmethod
     def from_parameters(parameters: ModelParameters) -> "MagneticField":
-        x = np.linspace(parameters.center - 3*parameters.width, parameters.center + 3*parameters.width, num = 1000)
+        x = np.linspace(parameters.center - 1.5*parameters.width, parameters.center + 1.5*parameters.width, num = 1000)
         y = gaussian(parameters.to_numpy(), x)
         return MagneticField(x, y)
 
@@ -227,3 +227,5 @@ if __name__ == "__main__":
 
     # calcular alfa e beta nas posições desejadas
     alfa, beta = alfa_beta(e,b, np.arange(0, 280e-3, 1e-3))
+    plt.plot(beta)
+    plt.show()
