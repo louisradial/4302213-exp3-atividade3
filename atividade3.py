@@ -122,14 +122,6 @@ class Field:
     position: np.ndarray
     intensity: np.ndarray
 
-class ElectricField(Field):
-    @staticmethod
-    def from_csv(filename: str, voltage: float) -> "ElectricField":
-        df = pandas.read_csv(filename, sep="\t")
-        x = df.iloc[:, 0].to_numpy()*1e-3
-        y = df.iloc[:, 1].to_numpy()/voltage
-        return ElectricField(x, y)
-
     def interpolate(self, x: float) -> float:
         f = interpolate.interp1d(self.position, self.intensity)
         if x > min(self.position) and x < max(self.position):
@@ -143,6 +135,15 @@ class ElectricField(Field):
             res.append(self.interpolate(x))
         return np.array(res)
 
+
+class ElectricField(Field):
+    @staticmethod
+    def from_csv(filename: str, voltage: float) -> "ElectricField":
+        df = pandas.read_csv(filename, sep="\t")
+        x = df.iloc[:, 0].to_numpy()*1e-3
+        y = df.iloc[:, 1].to_numpy()/voltage
+        return ElectricField(x, y)
+
 class MagneticField(Field):
     @staticmethod
     def from_csv(filename: str, current: float, offset: float) -> "MagneticField":
@@ -151,9 +152,15 @@ class MagneticField(Field):
         y = df.iloc[:, 1].to_numpy()/current
         return MagneticField(x, y)
 
-def alfa_beta(e_field: ElectricField, b_field_parameters: ModelParameters, positions: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    @staticmethod
+    def from_parameters(parameters: ModelParameters) -> "MagneticField":
+        x = np.linspace(parameters.center - 3*parameters.width, parameters.center + 3*parameters.width, num = 1000)
+        y = gaussian(parameters.to_numpy(), x)
+        return MagneticField(x, y)
+
+def alfa_beta(e_field: ElectricField, b_field: MagneticField, positions: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     alfa = e_field.output(positions)
-    beta = gaussian(b_field_parameters.to_numpy(), positions)
+    beta = b_field.output(positions)
     return alfa, beta
 
 if __name__ == "__main__":
@@ -163,27 +170,24 @@ if __name__ == "__main__":
     # b = MagneticField.from_csv("magnético-49.7mA", 49.7e-3, 0.975-8.81e-2)
 
     # ajusta dados do sensor Hall, normalizados pela corrente
-    parameters = []
-    sparameters = []
     model = Model(gaussian)
+    estimate = ModelParameters()
+    data = []
     for i in range (1, 5):
-        data = ModelData.from_csv("magnético", i)
-        estimate = ModelParameters()
-        model.fit_curve(data, estimate)
-        parameters.append(model.parameters)
-        sparameters.append(model.s_parameters)
+        data.append(ModelData.from_csv("magnético", i))
+        model.fit_curve(data[i-1], estimate)
         name = "Dependência do campo magnético normalizado pela corrente com a posição"
         fig = plt.figure(name, layout="constrained")
         fig.suptitle(name)
         gs = GridSpec(2,1,figure=fig, height_ratios=[3,1])
         ax0 = fig.add_subplot(gs[0])
         ax1 = fig.add_subplot(gs[1])
-        ax0.errorbar(x=data.x, xerr=data.sx, y=data.y, yerr=np.square(data.sy), **kwargs_errorbar)
+        ax0.errorbar(x=data[i-1].x, xerr=data[i-1].sx, y=data[i-1].y, yerr=np.square(data[i-1].sy), **kwargs_errorbar)
         model.fit.plot_fit(ax0, "#cba6f7")
         ax0.set(ylabel=r"$\beta(x)$ (T/A)", )
         ax0.grid(which='major', alpha=0.8)
         ax0.grid(which='minor', alpha=0.2)
-        model.fit.plot_residues(ax1, data.x, data.sx)
+        model.fit.plot_residues(ax1, data[i-1].x, data[i-1].sx)
         ax0.tick_params(labelbottom=False)
         ax1.grid(which='major', alpha=0.8)
         ax1.grid(which='minor', alpha=0.2)
@@ -191,9 +195,35 @@ if __name__ == "__main__":
         plt.show()
         save_figure(fig, "beta{0}".format(i))
 
+    x = np.concatenate((data[0].x, data[1].x, data[2].x, data[3].x))
+    sx = np.concatenate((data[0].sx, data[1].sx, data[2].sx, data[3].sx))
+    y = np.concatenate((data[0].y, data[1].y, data[2].y, data[3].y))
+    sy = np.concatenate((data[0].sy, data[1].sy, data[2].sy, data[3].sy))
+    data = ModelData(x, sx, y, sy)
+    model.fit_curve(data, estimate)
+    name = "Dependência do campo magnético normalizado pela corrente com a posição"
+    fig = plt.figure(name, layout="constrained")
+    fig.suptitle(name)
+    gs = GridSpec(2,1,figure=fig, height_ratios=[3,1])
+    ax0 = fig.add_subplot(gs[0])
+    ax1 = fig.add_subplot(gs[1])
+    ax0.errorbar(x=data.x, xerr=data.sx, y=data.y, yerr=np.square(data.sy), **kwargs_errorbar)
+    model.fit.plot_fit(ax0, "#cba6f7")
+    ax0.set(ylabel=r"$\beta(x)$ (T/A)", )
+    ax0.grid(which='major', alpha=0.8)
+    ax0.grid(which='minor', alpha=0.2)
+    model.fit.plot_residues(ax1, data.x, data.sx)
+    ax0.tick_params(labelbottom=False)
+    ax1.grid(which='major', alpha=0.8)
+    ax1.grid(which='minor', alpha=0.2)
+    ax1.set(xlabel="$x$ (m)")
+    plt.show()
+    save_figure(fig, "beta")
+
     # escolher parâmetros
-    b_params = parameters[0]
+    b_params = model.parameters
     b_params.center = 8.81e-2 # centro da bobina fica 8.81cm do início do feixe
+    b = MagneticField.from_parameters(b_params)
 
     # calcular alfa e beta nas posições desejadas
-    alfa, beta = alfa_beta(e,b_params, np.arange(0, 280e-3, 1e-3))
+    alfa, beta = alfa_beta(e,b, np.arange(0, 280e-3, 1e-3))
