@@ -135,6 +135,19 @@ class Field:
             res.append(self.interpolate(x))
         return np.array(res)
 
+    def plot(self, title: str, color: str, ylabel: str, of=None):
+        fig = plt.figure(title, layout="constrained")
+        fig.suptitle(title)
+        gs = GridSpec(1,1, figure=fig)
+        ax = fig.add_subplot(gs[0])
+        ax.plot(self.position, self.intensity, c=color)
+        ax.set(ylabel=ylabel)
+        ax.set(xlabel=r"$x$ (m)")
+        ax.grid(which='major', alpha=0.8)
+        ax.grid(which='minor', alpha=0.2)
+        plt.show()
+        save_figure(fig, of)
+
 
 class ElectricField(Field):
     @staticmethod
@@ -154,7 +167,8 @@ class MagneticField(Field):
 
     @staticmethod
     def from_parameters(parameters: ModelParameters) -> "MagneticField":
-        x = np.linspace(parameters.center - 1.5*parameters.width, parameters.center + 1.5*parameters.width, num = 1000)
+        k = 4/math.sqrt(2)
+        x = np.linspace(parameters.center - k*parameters.width, parameters.center + k*parameters.width, num = 1000)
         y = gaussian(parameters.to_numpy(), x)
         return MagneticField(x, y)
 
@@ -165,7 +179,8 @@ def alfa_beta(e_field: ElectricField, b_field: MagneticField, positions: np.ndar
 
 if __name__ == "__main__":
     # carrega simulação do FEMM
-    e = ElectricField.from_csv("elétrico", 10.0)
+    e = ElectricField.from_csv("elétrico", 10.0) # 9.2 ficaria bom ein...
+    e.plot("Dependência do campo elétrico normalizado pela tensão com a posição", "#fab387", r"$\alpha(x)$ (1/m)", of="alfa")
     # carrega dados do sensor Hall, não usar mais.
     # b = MagneticField.from_csv("magnético-49.7mA", 49.7e-3, 0.975-8.81e-2)
 
@@ -222,10 +237,109 @@ if __name__ == "__main__":
 
     # escolher parâmetros
     b_params = model.parameters
-    b_params.center = 8.81e-2 # centro da bobina fica 8.81cm do início do feixe
+    b_params.center = 8.81e-2# + 6e-3 # centro da bobina fica 8.81cm do início do feixe
+    # b_params.offset = 0
     b = MagneticField.from_parameters(b_params)
+    # b.plot("Dependência do campo magnético normalizado pela corrente com a posição", "#cba6f7", r"$\beta(x)$ (T/A)")
 
     # calcular alfa e beta nas posições desejadas
     alfa, beta = alfa_beta(e,b, np.arange(0, 280e-3, 1e-3))
-    plt.plot(beta)
+    plt.plot(np.arange(0, 280e-3, 1e-3), beta)
     plt.show()
+
+def traj(vp, i, vac):
+    q = 1.6*10**(-19)
+    m = 9.11*10**(-31)
+    B = []
+    E = []
+    k = 0
+    while k <= 279:
+        B.append(i*beta[k])
+        E.append(vp*alfa[k])
+        k += 1
+    vx = [math.sqrt(2*vac*q/m)]
+    vz = [0]
+    ax = [0]
+    az = [0]
+    Dt = [0]
+    z = [0]
+    x = [0]
+    j = 0
+    while j <= 278:
+        j += 1
+        ax.append((q/m)*(B[j]*vz[j-1]))
+        az.append((q/m)*(E[j]-B[j]*vx[j-1]))
+        x.append(j*1e-3)
+        vx.append(np.sqrt(vx[j-1]**2 + 2e-3*ax[j]))
+        Dt.append(2e-3/(vx[j]+vx[j-1]))
+        vz.append(vz[j-1]+az[j]*Dt[j])
+        z.append(z[j-1]+vz[j-1]*Dt[j-1]+(az[j]*Dt[j]**2)/2)
+    data = [x,z]
+    return data
+
+def graf(cols, cor, title):
+    name  = ["z", "vp", "vac", "i"]
+    data = pandas.read_csv("novo.csv", usecols = cols, names = name, header=0)
+    if cols == [0,1,2,3] or cols == [4,5,6,7]:
+        yz = []
+        z = []
+        vp = np.linspace(-30, 30, num = 100)
+        vac = np.linspace(400, 1200, num = 100)
+        for v in vp:
+            simu = traj(v, 0, 1200)
+            z.append(1e3*simu[1][-1])
+            yz.append(v/1200)
+        for v in vac:
+            simu = traj(8, 0, v)
+            z.append(1e3*simu[1][-1])
+            yz.append(8/v)
+        y = []
+        for i in range(len(data.z)):
+            y.append(data.vp[i]/data.vac[i])
+        plt.scatter(y, data.z, label = "Dados", color = "black", s = 10)
+        plt.plot(yz, z, label = "Simulação", color = cor)
+        plt.xlabel(r"$\frac{V_p}{V_{AC}}$")
+        plt.ylabel("Deflexão (mm)")
+        plt.title(title)
+        plt.grid()
+        plt.legend()
+        plt.show()
+    if cols == [8,9,10,11] or cols == [12,13,14,15]:
+        yz = []
+        z = []
+        i = np.linspace(-4e-2, 4e-2, num = 100)
+        vac = np.linspace(300, 1200, num = 100)
+        for j in i:
+            simu = traj(0, j, 1000)
+            z.append(1e3*simu[1][-1])
+            yz.append(j/math.sqrt(1000))
+        for v in vac:
+            simu = traj(0, 2e-2, v)
+            z.append(1e3*simu[1][-1])
+            yz.append(2e-2/math.sqrt(v))
+        for v in vac:
+            simu = traj(0, -2e-2, v)
+            z.append(1e3*simu[1][-1])
+            yz.append(-2e-2/math.sqrt(v))
+        # for i in range(len(data.z)):
+        #     simu = traj(data.vp[i], data.i[i], data.vac[i])
+        #     z.append(-1e3*simu[1][-1])
+        y = []
+        z_ = []
+        for i in range(len(data.z)):
+            z_.append(-10*data.z[i])
+            y.append(data.i[i]/np.sqrt(data.vac[i]))
+        plt.scatter(y, z_, label = "Dados", color = "black", s = 10)
+        plt.plot(yz, z, label = "Simulação", color = cor)
+        plt.xlabel(r"$\frac{i}{\sqrt{V_{AC}}}\;\left(\frac{A}{V^{\frac{1}{2}}}\right)$")
+        plt.xticks(np.arange(-0.0010,0.0013, 0.0005))
+        plt.ylabel("Deflexão (mm)")
+        plt.title(title)
+        plt.grid()
+        plt.legend()
+        plt.show()
+
+graf([0,1,2,3], "purple", "Simulação com campo elétrico")
+graf([4,5,6,7], "olive", "Simulação com campo elétrico")
+graf([8,9,10,11], "cyan", "Simulação com campo magnético")
+graf([12,13,14,15], "pink", "Simulação com campo magnético")
